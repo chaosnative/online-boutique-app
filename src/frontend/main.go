@@ -20,6 +20,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+    "html/template"
+	"strconv"
 
 	"cloud.google.com/go/profiler"
 	"contrib.go.opencensus.io/exporter/jaeger"
@@ -33,7 +35,38 @@ import (
 	"go.opencensus.io/stats/view"
 	"go.opencensus.io/trace"
 	"google.golang.org/grpc"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
+var serviceVersion string
+var overviewTemplate *template.Template
+// create a new counter vector
+var getCallCounter = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "http_requests_total", // metric name
+		Help: "Number of get requests.",
+	},
+	[]string{"status"}, // labels
+)
+
+var buckets = []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10}
+var responseTimeHistogram = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+	Name:      "http_server_request_duration_seconds",
+	Help:      "Histogram of response time for handler in seconds",
+	Buckets: buckets,
+}, []string{"route", "method", "status_code"})
+
+type Overview struct {
+	Version string
+}
+
+// create a handler struct
+type HTTPHandler struct{}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	statusCode int
+}
 
 const (
 	port            = "8080"
@@ -79,6 +112,66 @@ type frontendServer struct {
 	adSvcAddr string
 	adSvcConn *grpc.ClientConn
 }
+
+func (rec *statusRecorder) WriteHeader(statusCode int) {
+	rec.statusCode = statusCode
+	rec.ResponseWriter.WriteHeader(statusCode)
+}
+
+func getRoutePattern(r *http.Request) string {
+	reqContext := mux.CurrentRoute(r)
+	if pattern, _ := reqContext.GetPathTemplate(); pattern != "" {
+		return pattern
+	}
+
+	fmt.Println(reqContext.GetPathRegexp())
+
+	return "undefined"
+}
+// implement `ServeHTTP` method on `HttpHandler` struct
+func (h HTTPHandler) ServeHTTP(res http.ResponseWriter, req *http.Request) {
+	var status string
+	defer func() {
+		// increment the counter on defer func
+		getCallCounter.WithLabelValues(status).Inc()
+	}()
+
+	overviewData := Overview{
+		Version: serviceVersion,
+	}
+	overviewTemplate = template.Must(template.ParseFiles("./templates/home.html"))
+	err := overviewTemplate.Execute(res, overviewData)
+
+	// Slow build
+	if serviceVersion == "0.1.2" {
+		time.Sleep(2 * time.Second)
+	}
+
+	if err != nil {
+		status = "error"
+	}
+	status = "success"
+}
+func prometheusMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rec := statusRecorder{w, 200}
+
+		next.ServeHTTP(&rec, r)
+
+		duration := time.Since(start)
+		statusCode := strconv.Itoa(rec.statusCode)
+		route := getRoutePattern(r)
+		fmt.Println(duration.Seconds())
+		responseTimeHistogram.WithLabelValues(route, r.Method, statusCode).Observe(duration.Seconds())
+	})
+}
+
+func init() {
+	prometheus.Register(getCallCounter)
+	prometheus.Register(responseTimeHistogram)
+}
+
 
 func main() {
 	ctx := context.Background()
@@ -142,7 +235,8 @@ func main() {
 	r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir("./static/"))))
 	r.HandleFunc("/robots.txt", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, "User-agent: *\nDisallow: /") })
 	r.HandleFunc("/_healthz", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, "ok") })
-
+	r.Use(prometheusMiddleware)
+    r.Path("/metrics").Handler(promhttp.Handler())
 	var handler http.Handler = r
 	handler = &logHandler{log: log, next: handler} // add logging
 	handler = ensureSessionID(handler)             // add session ID
