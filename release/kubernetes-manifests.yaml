@@ -22,6 +22,8 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: emailservice
+  labels:
+    app: emailservice
 spec:
   selector:
     matchLabels:
@@ -78,6 +80,8 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: checkoutservice
+  labels:
+    app: checkoutservice
 spec:
   selector:
     matchLabels:
@@ -147,6 +151,8 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: recommendationservice
+  labels:
+    app: recommendationservice
 spec:
   selector:
     matchLabels:
@@ -207,6 +213,8 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: frontend
+  labels:
+    app: frontend
 spec:
   selector:
     matchLabels:
@@ -307,6 +315,8 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: paymentservice
+  labels:
+    app: paymentservice
 spec:
   selector:
     matchLabels:
@@ -363,6 +373,8 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: productcatalogservice
+  labels:
+    app: productcatalogservice
 spec:
   selector:
     matchLabels:
@@ -421,6 +433,8 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: cartservice
+  labels:
+    app: cartservice
 spec:
   selector:
     matchLabels:
@@ -474,6 +488,8 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: loadgenerator
+  labels:
+    app: loadgenerator
 spec:
   selector:
     matchLabels:
@@ -525,6 +541,8 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: currencyservice
+  labels:
+    app: currencyservice
 spec:
   selector:
     matchLabels:
@@ -582,6 +600,8 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: shippingservice
+  labels:
+    app: shippingservice
 spec:
   selector:
     matchLabels:
@@ -640,6 +660,8 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: redis-cart
+  labels:
+    app: redis-cart
 spec:
   selector:
     matchLabels:
@@ -693,6 +715,8 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: adservice
+  labels:
+    app: adservice
 spec:
   selector:
     matchLabels:
