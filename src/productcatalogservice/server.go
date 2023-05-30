@@ -22,27 +22,41 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
-	pb "github.com/GoogleCloudPlatform/microservices-demo/src/productcatalogservice/genproto"
-	healthpb "google.golang.org/grpc/health/grpc_health_v1"
-
 	"cloud.google.com/go/profiler"
 	"contrib.go.opencensus.io/exporter/jaeger"
 	"contrib.go.opencensus.io/exporter/stackdriver"
+	pb "github.com/GoogleCloudPlatform/microservices-demo/src/productcatalogservice/genproto"
 	"github.com/golang/protobuf/jsonpb"
+	harness "github.com/harness/ff-golang-server-sdk/client"
+	"github.com/harness/ff-golang-server-sdk/dto"
 	"github.com/sirupsen/logrus"
-	//  "go.opencensus.io/exporter/jaeger"
 	"go.opencensus.io/plugin/ocgrpc"
 	"go.opencensus.io/stats/view"
 	"go.opencensus.io/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/metrics/pkg/client/clientset/versioned"
+	//  "go.opencensus.io/exporter/jaeger"
+)
+
+const (
+	cpuThreshold   = 80     // CPU usage threshold in percentage
+	networkIF      = "eth0" // Network interface for tc rule
+	tcRulePriority = 1      // Priority for the tc rule
+	interval       = 2      // Interval for checking CPU utilization
 )
 
 var (
@@ -54,6 +68,8 @@ var (
 	port = "3550"
 
 	reloadCatalog bool
+	flagName      = "product"
+	apiKey        = os.Getenv("FF_API_KEY")
 )
 
 func init() {
@@ -102,6 +118,157 @@ func main() {
 	} else {
 		extraLatency = time.Duration(0)
 	}
+	logger := logrus.New()
+	logger.SetLevel(logrus.ErrorLevel)
+	client, err := harness.NewCfClient(apiKey,
+		harness.WithURL("https://config.ff.harness.io/api/1.0"),
+		harness.WithEventsURL("https://events.ff.harness.io/api/1.0"),
+		harness.WithPullInterval(1),
+		harness.WithLogger(logger),
+		harness.WithStreamEnabled(false))
+
+	defer func() {
+		if err := client.Close(); err != nil {
+			log.Printf("error while closing client err: %v", err)
+		}
+	}()
+
+	if err != nil {
+		log.Printf("could not connect to CF servers %v", err)
+	}
+
+	target := dto.NewTargetBuilder("HT_1").
+		Name("Harness_Target_1").
+		Custom("email", "demo@harness.io").
+		Build()
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	go func() {
+		// Build the config from the provided kubeconfig file
+		kubeconfig := flag.String("kubeconfig", "", "absolute path to the kubeconfig file")
+		flag.Parse()
+		config, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
+		if err != nil {
+			log.Fatal(err)
+		}
+		metricsClient, err := versioned.NewForConfig(config)
+		if err != nil {
+			log.Fatal(err)
+		}
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				showFeature, err := client.BoolVariation(flagName, &target, false)
+
+				if err != nil {
+					fmt.Printf("Error getting value: %v", err)
+				}
+
+				fmt.Printf("KeyFeature flag '%s' is %t for this user\n", flagName, showFeature)
+				podName, namespace, err := GetPodInfo()
+				if err != nil {
+					panic(err)
+				}
+
+				println("Pod Name:", podName)
+				println("Namespace:", namespace)
+				if showFeature {
+					ctx = context.TODO()
+					println("Fetching the utilization")
+					err = wait.PollImmediateUntil(interval, func() (done bool, err error) {
+
+						podMetrics, err := metricsClient.MetricsV1beta1().PodMetricses(namespace).Get(context.TODO(), podName, metav1.GetOptions{})
+						if err != nil {
+							log.Error(err)
+							return false, err
+						}
+						var totalCPUUsage int64
+						//var totalCPURequests int64
+						var cpuUsageMillicores int64
+						for _, container := range podMetrics.Containers {
+							cpuUsage := container.Usage[corev1.ResourceCPU]
+							cpuUsageMillicores = cpuUsage.MilliValue()
+							totalCPUUsage += cpuUsageMillicores
+
+							// cpuRequests := container.Usage[corev1.ResourceRequestsCPU]
+							// cpuRequestsMillicores := cpuRequests.MilliValue()
+							// totalCPURequests += cpuRequestsMillicores
+						}
+
+						println(cpuUsageMillicores)
+						if cpuUsageMillicores > cpuThreshold {
+							addLatency()
+						}
+
+						return true, nil
+					}, ctx.Done())
+				}
+				println("pintinggggg")
+				//time.Sleep(10 * time.Second)
+
+			}
+		}
+
+	}()
+
+	time.Sleep(5 * time.Second)
+	cancel()
+
+	// // Create the Kubernetes client
+	// clientset, err := kubernetes.NewForConfig(config)
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
+
+	// Create the Metrics client
+
+	// ctx = context.TODO()
+
+	// go func() {
+	// 	for {
+	// 		// Get the CPU utilization of the pod
+	// 		println("Fetching the utilization")
+	// 		err = wait.PollImmediateUntil(interval, func() (done bool, err error) {
+
+	// 			podMetrics, err := metricsClient.MetricsV1beta1().PodMetricses(namespace).Get(context.TODO(), podName, metav1.GetOptions{})
+	// 			if err != nil {
+	// 				return false, err
+	// 			}
+
+	// 			// var cpuUtilization float64
+	// 			// for _, container := range podMetrics.Containers {
+	// 			// 	cpuUsage := container.Usage[corev1.ResourceCPU]
+	// 			// 	cpuQuantity := cpuUsage.Value()
+	// 			// 	cpuUtilization += float64(cpuQuantity)
+
+	// 			// }
+
+	// 			for _, container := range podMetrics.Containers {
+	// 				cpuUsage := container.Usage[corev1.ResourceCPU]
+	// 				cpuUsageMillicores = cpuUsage.MilliValue()
+	// 				totalCPUUsage += cpuUsageMillicores
+
+	// 				// cpuRequests := container.Usage[corev1.ResourceRequestsCPU]
+	// 				// cpuRequestsMillicores := cpuRequests.MilliValue()
+	// 				// totalCPURequests += cpuRequestsMillicores
+	// 			}
+	// 			//cpuUtilization := (float64(totalCPUUsage) / float64(totalCPURequests)) * 100
+	// 			println(cpuUsageMillicores)
+
+	// 			// if cpuUsageFloat > cpuThreshold {
+	// 			// 	addTCRule()
+	// 			// } else {
+	// 			// 	removeTCRule()
+	// 			// }
+
+	// 			return true, nil
+	// 		}, ctx.Done())
+
+	// 	}
+	// }()
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGUSR1, syscall.SIGUSR2)
@@ -125,6 +292,40 @@ func main() {
 	log.Infof("starting grpc server at :%s", port)
 	run(port)
 	select {}
+}
+
+// GetPodInfo retrieves the current pod name and namespace using the downward API
+func GetPodInfo() (string, string, error) {
+
+	// Read the namespace from the downward API
+	namespaceBytes, err := ioutil.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
+	if err != nil {
+		return "", "", err
+	}
+	namespace := string(namespaceBytes)
+
+	podName := os.Getenv("HOSTNAME")
+	if podName == "" {
+		return "", "", err
+	}
+
+	return podName, namespace, nil
+}
+func addLatency() {
+	cmd := exec.Command("tc", "qdisc", "add", "dev", "eth0", "root", "netem", "delay", "1000ms")
+	if err := cmd.Run(); err != nil {
+		log.Println("Error adding tc rule:", err)
+		return
+	}
+	log.Println("Added tc rule for CPU threshold.")
+	time.Sleep(20)
+	cmd = exec.Command("tc", "qdisc", "del", "dev", "eth0", "root", "netem")
+	if err := cmd.Run(); err != nil {
+		log.Println("Error removing tc rule:", err)
+		return
+	}
+	log.Println("Removed tc rule for CPU threshold.")
+
 }
 
 func run(port string) string {
