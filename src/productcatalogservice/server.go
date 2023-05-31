@@ -312,13 +312,13 @@ func GetPodInfo() (string, string, error) {
 	return podName, namespace, nil
 }
 func addLatency() {
-	cmd := exec.Command("tc", "qdisc", "add", "dev", "eth0", "root", "netem", "delay", "1000ms")
+	cmd := exec.Command("tc", "qdisc", "add", "dev", "eth0", "root", "netem", "delay", "2000ms")
 	if err := cmd.Run(); err != nil {
 		log.Println("Error adding tc rule:", err)
 		return
 	}
 	log.Println("Added tc rule for CPU threshold.")
-	time.Sleep(20)
+	time.Sleep(20 * time.Second)
 	cmd = exec.Command("tc", "qdisc", "del", "dev", "eth0", "root", "netem")
 	if err := cmd.Run(); err != nil {
 		log.Println("Error removing tc rule:", err)
