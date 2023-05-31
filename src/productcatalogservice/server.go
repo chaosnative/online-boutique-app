@@ -68,7 +68,7 @@ var (
 	port = "3550"
 
 	reloadCatalog bool
-	flagName      = "product"
+	flagName      = os.Getenv("FF_NAME")
 	apiKey        = os.Getenv("FF_API_KEY")
 )
 
@@ -186,16 +186,12 @@ func main() {
 							return false, err
 						}
 						var totalCPUUsage int64
-						//var totalCPURequests int64
 						var cpuUsageMillicores int64
 						for _, container := range podMetrics.Containers {
 							cpuUsage := container.Usage[corev1.ResourceCPU]
 							cpuUsageMillicores = cpuUsage.MilliValue()
 							totalCPUUsage += cpuUsageMillicores
 
-							// cpuRequests := container.Usage[corev1.ResourceRequestsCPU]
-							// cpuRequestsMillicores := cpuRequests.MilliValue()
-							// totalCPURequests += cpuRequestsMillicores
 						}
 
 						println(cpuUsageMillicores)
@@ -206,8 +202,7 @@ func main() {
 						return true, nil
 					}, ctx.Done())
 				}
-				println("pintinggggg")
-				//time.Sleep(10 * time.Second)
+				time.Sleep(10 * time.Second)
 
 			}
 		}
@@ -216,59 +211,6 @@ func main() {
 
 	time.Sleep(5 * time.Second)
 	cancel()
-
-	// // Create the Kubernetes client
-	// clientset, err := kubernetes.NewForConfig(config)
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
-
-	// Create the Metrics client
-
-	// ctx = context.TODO()
-
-	// go func() {
-	// 	for {
-	// 		// Get the CPU utilization of the pod
-	// 		println("Fetching the utilization")
-	// 		err = wait.PollImmediateUntil(interval, func() (done bool, err error) {
-
-	// 			podMetrics, err := metricsClient.MetricsV1beta1().PodMetricses(namespace).Get(context.TODO(), podName, metav1.GetOptions{})
-	// 			if err != nil {
-	// 				return false, err
-	// 			}
-
-	// 			// var cpuUtilization float64
-	// 			// for _, container := range podMetrics.Containers {
-	// 			// 	cpuUsage := container.Usage[corev1.ResourceCPU]
-	// 			// 	cpuQuantity := cpuUsage.Value()
-	// 			// 	cpuUtilization += float64(cpuQuantity)
-
-	// 			// }
-
-	// 			for _, container := range podMetrics.Containers {
-	// 				cpuUsage := container.Usage[corev1.ResourceCPU]
-	// 				cpuUsageMillicores = cpuUsage.MilliValue()
-	// 				totalCPUUsage += cpuUsageMillicores
-
-	// 				// cpuRequests := container.Usage[corev1.ResourceRequestsCPU]
-	// 				// cpuRequestsMillicores := cpuRequests.MilliValue()
-	// 				// totalCPURequests += cpuRequestsMillicores
-	// 			}
-	// 			//cpuUtilization := (float64(totalCPUUsage) / float64(totalCPURequests)) * 100
-	// 			println(cpuUsageMillicores)
-
-	// 			// if cpuUsageFloat > cpuThreshold {
-	// 			// 	addTCRule()
-	// 			// } else {
-	// 			// 	removeTCRule()
-	// 			// }
-
-	// 			return true, nil
-	// 		}, ctx.Done())
-
-	// 	}
-	// }()
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGUSR1, syscall.SIGUSR2)
@@ -318,7 +260,7 @@ func addLatency() {
 		return
 	}
 	log.Println("Added tc rule for CPU threshold.")
-	time.Sleep(20 * time.Second)
+	time.Sleep(30 * time.Second)
 	cmd = exec.Command("tc", "qdisc", "del", "dev", "eth0", "root", "netem")
 	if err := cmd.Run(); err != nil {
 		log.Println("Error removing tc rule:", err)
