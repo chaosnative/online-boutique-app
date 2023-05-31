@@ -68,8 +68,9 @@ var (
 	port = "3550"
 
 	reloadCatalog bool
-	flagName      = os.Getenv("FF_NAME")
-	apiKey        = os.Getenv("FF_API_KEY")
+	//flagName      = os.Getenv("FF_NAME")
+	flagName = "product"
+	apiKey   = os.Getenv("FF_API_KEY")
 )
 
 func init() {
